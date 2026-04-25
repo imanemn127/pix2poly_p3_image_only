@@ -5,9 +5,9 @@ from torch.nn import functional as F
 from timm.models.layers import trunc_normal_
 from torch.nn.parallel import DistributedDataParallel as DDP
 
-from ..pointpillars import PointPillarsViT
+#from ..pointpillars import PointPillarsViT
 from ..vision_transformer import ViT, ViTDINOv2
-from ..fusion_layers import EarlyFusionViT
+#from ..fusion_layers import EarlyFusionViT
 
 def generate_square_subsequent_mask(sz,device):
     mask = (
