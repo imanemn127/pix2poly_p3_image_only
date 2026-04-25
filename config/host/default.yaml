@@ -1,6 +1,6 @@
 name: default
-dataset_root: /path/to/your/dataset/root
-model_root: /path/to/your/model/root
+data_root: /mnt/DATA/IMANE/p3_NY_full/data
+model_root: /mnt/DATA/IMANE
 
 multi_gpu: false
 device: cuda
