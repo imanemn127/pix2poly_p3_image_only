@@ -1,0 +1,28 @@
+defaults:
+  - host: default
+  - run_type: release
+  # - dataset: rgd
+  - experiment: default
+  - training: default
+  - evaluation: val
+  # - experiment: ffl_image
+  # - experiment: lidar_density_ablation256.yaml
+  # - experiment: hisup_fusion
+  # - experiment: p2p_fusion
+  # - experiment: p2p_lidar
+  - _self_
+
+
+output_dir: ${.experiment.dataset.out_path}/${.experiment.model.name}/${.experiment.encoder.in_size}/${.experiment.name}
+
+checkpoint: null
+
+num_workers: ${.run_type.num_workers}
+
+hydra:
+  run:
+    dir: ${...output_dir}
+
+
+
+

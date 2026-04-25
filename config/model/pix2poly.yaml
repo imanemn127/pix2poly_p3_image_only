@@ -1,0 +1,32 @@
+name: pix2poly
+
+decoder:
+    in_feature_size: ${...encoder.patch_feature_size}
+    in_feature_width: ${.in_feature_size}
+    in_feature_height: ${.in_feature_size}
+
+    in_feature_dim: 256
+
+tokenizer: 
+    num_bins: ${...encoder.in_size}
+    shuffle_tokens: false
+    max_num_vertices: 192
+    max_len: null
+    pad_idx: null
+    generation_steps: null
+
+shuffle_polygons: false
+
+fusion: patch_concat # or feature_concat
+
+# optimization
+sinkhorn_iterations: 100
+vertex_loss_weight: 1.0
+perm_loss_weight: 10.0
+
+# training
+batch_size: ${...run_type.batch_size}
+start_epoch: 0
+num_epochs: 200
+learning_rate: 3e-4
+weight_decay: 1e-4
