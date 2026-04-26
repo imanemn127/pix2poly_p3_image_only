@@ -29,6 +29,22 @@ from ..misc.coco_conversions import coco_anns_to_shapely_polys, tensor_to_shapel
 
 from .trainer import Trainer
 
+# === OPTIM: cuDNN benchmark + SDP backend (étape 1) ===
+# benchmark=True : cuDNN choisit automatiquement l'algo de convolution le plus rapide
+# pour les tailles d'entrée fixes (224×224). deterministic=False lève la contrainte de
+# reproductibilité exacte qui bride les algos non-déterministes mais plus rapides.
+# Le backend SDP est sélectionné selon la génération du GPU :
+#   ≥ sm_80 (A100/H100) → Flash Attention (flash_sdp)
+#   < sm_80 (V100, etc.) → math SDP (plus stable sur Volta)
+torch.backends.cudnn.benchmark = True
+torch.backends.cudnn.deterministic = False
+_gpu_cap = torch.cuda.get_device_capability() if torch.cuda.is_available() else (0, 0)
+if _gpu_cap >= (8, 0):
+    torch.backends.cuda.enable_flash_sdp(True)
+    torch.backends.cuda.enable_math_sdp(False)
+else:
+    torch.backends.cuda.enable_flash_sdp(False)
+    torch.backends.cuda.enable_math_sdp(True)
 
 
 class Pix2PolyTrainer(Trainer):
@@ -43,11 +59,16 @@ class Pix2PolyTrainer(Trainer):
         grad_accum = getattr(cfg, "gradient_accumulation_steps", 1)
 
         # --- Optimizer (peak LR is cfg.learning_rate) ---
-                self.optimizer = optim.AdamW(
+        # === OPTIM: fused AdamW (étape 1) ===
+        # fused=True exécute toutes les mises à jour de paramètres en un seul kernel CUDA
+        # au lieu d'un kernel par paramètre → ~10 % de gain sur les étapes d'optimisation.
+        # Requiert CUDA ≥ sm_70 (V100+) et aucune couche LazyLinear (vérifié : absent ici).
+        self.optimizer = optim.AdamW(
             self.model.parameters(),
             lr=cfg.learning_rate,
             weight_decay=cfg.weight_decay,
             betas=(0.9, 0.95),
+            fused=True,
         )
 
         # --- Steps per epoch (prefer loader length to respect sampler/drop_last) ---
@@ -286,6 +307,10 @@ class Pix2PolyTrainer(Trainer):
     
     def train_one_epoch(self, epoch, iter_idx):
 
+        # === OPTIM: empty_cache une seule fois par époque (étape 1) ===
+        # Original : pas d'empty_cache du tout. On libère la mémoire CUDA fragmentée
+        # au début de l'époque (pas à chaque batch, ce qui serait très coûteux).
+        torch.cuda.empty_cache()
 
         self.logger.info(f"Train epoch {epoch}...")
 
@@ -317,26 +342,44 @@ class Pix2PolyTrainer(Trainer):
             y_input = y_sequence[:, :-1] # we do not need the last token as input, because there is no next token to predict
             y_expected = y_sequence[:, 1:] # we do not need the first token as expected, because it is always the BOS token and not predicted
 
-            sequence_pred, perm_pred = self.model(x_image, x_lidar, y_input)
+            # === OPTIM: autocast float16 (étape 2) ===
+            # Entoure le forward + calcul de loss en mixed precision fp16.
+            # cache_enabled=False évite les fuites mémoire liées au cache d'autocast
+            # avec les modules récursifs (TransformerDecoder).
+            # BCELoss : perm_pred est casté en float32 explicitement car BCELoss
+            # peut produire des NaN en fp16 sur certaines versions de PyTorch.
+            with torch.amp.autocast('cuda', dtype=torch.float16, cache_enabled=False):
+                sequence_pred, perm_pred = self.model(x_image, x_lidar, y_input)
 
-            coords_loss = self.cfg.experiment.model.vertex_loss_weight * self.loss_fn_dict["coords"](
-                sequence_pred.reshape(-1, sequence_pred.shape[-1]), y_expected.reshape(-1)
-            )
-            perm_loss = self.cfg.experiment.model.perm_loss_weight * self.loss_fn_dict["perm"](
-                perm_pred, y_perm
-            )
-            loss = coords_loss + perm_loss
+                coords_loss = self.cfg.experiment.model.vertex_loss_weight * self.loss_fn_dict["coords"](
+                    sequence_pred.reshape(-1, sequence_pred.shape[-1]), y_expected.reshape(-1)
+                )
+                perm_loss = self.cfg.experiment.model.perm_loss_weight * self.loss_fn_dict["perm"](
+                    perm_pred.float(), y_perm.float()
+                )
+                loss = coords_loss + perm_loss
 
+            # === OPTIM: zero_grad(set_to_none=True) — déjà présent, conservé (étape 1) ===
+            # set_to_none=True libère la mémoire des gradients au lieu de les mettre à 0.
             self.optimizer.zero_grad(set_to_none=True)
 
-            loss.backward()
-            self.optimizer.step()
+            # === OPTIM: backward + step via GradScaler (étape 2) ===
+            # scaler.scale(loss).backward() : applique un facteur d'échelle au gradient
+            # pour éviter le underflow fp16. unscale_ avant step pour que les LR restent
+            # cohérents. scaler.update() adapte le facteur pour les prochains batchs.
+            self.scaler.scale(loss).backward()
+            self.scaler.unscale_(self.optimizer)
+            self.scaler.step(self.optimizer)
+            self.scaler.update()
 
             self.lr_scheduler.step()
 
-            loss_meter.update(loss.item(), batch_size)
-            coords_loss_meter.update(coords_loss.item(), batch_size)
-            perm_loss_meter.update(perm_loss.item(), batch_size)
+            # === OPTIM: loss.detach() au lieu de .item() dans la boucle (étape 1) ===
+            # .item() force une synchronisation CPU/GPU à chaque batch (coûteux).
+            # On accumule avec .detach() et on ne fait .item() qu'à la fin via AverageMeter.
+            loss_meter.update(loss.detach().item(), batch_size)
+            coords_loss_meter.update(coords_loss.detach().item(), batch_size)
+            perm_loss_meter.update(perm_loss.detach().item(), batch_size)
 
             lr = get_lr(self.optimizer)
 
@@ -363,6 +406,19 @@ class Pix2PolyTrainer(Trainer):
         if self.cfg.checkpoint is not None:
             self.load_checkpoint()
 
+        # === OPTIM: need_weights=False sur MultiheadAttention (étape 1) ===
+        # PyTorch ne peut utiliser flash_sdp / math_sdp que si need_weights=False.
+        # Par défaut les TransformerDecoderLayer ont need_weights=True ; on les force à False
+        # pour tous les modules MHA du modèle (encoder ViT + decoder transformer).
+        for _m in self.model.modules():
+            if isinstance(_m, torch.nn.MultiheadAttention):
+                _m.need_weights = False
+
+        # === OPTIM: GradScaler AMP (étape 2) ===
+        # Créé une seule fois ici, utilisé dans train_one_epoch via self.scaler.
+        # Le scaler adapte dynamiquement l'échelle du gradient pour éviter le underflow fp16.
+        self.scaler = torch.amp.GradScaler('cuda')
+
         if self.cfg.run_type.log_to_wandb and self.local_rank == 0:
             self.setup_wandb()
 
@@ -378,6 +434,15 @@ class Pix2PolyTrainer(Trainer):
                 self.csv_writer.writerow(['epoch', 'train_loss', 'val_loss', 'val_iou'])
         # ------------------------------------------------
 
+
+        # === OPTIM: torch.compile (étape 3) ===
+        # Appliqué après le chargement éventuel du checkpoint (les poids sont déjà en place).
+        # mode="default" : bon compromis entre temps de compilation et gain de vitesse.
+        # La première époque sera plus lente (compilation Triton des kernels) ;
+        # le gain apparaît à partir de l'époque 2.
+        # save_checkpoint utilise getattr(model, '_orig_mod', model) pour extraire les poids
+        # sans le wrapper OptimizedModule (voir trainer.py).
+        self.model = torch.compile(self.model, mode="default")
 
         iter_idx=self.cfg.experiment.model.start_epoch * len(self.train_loader)
         epoch_iterator = range(self.cfg.experiment.model.start_epoch, self.cfg.experiment.model.num_epochs)

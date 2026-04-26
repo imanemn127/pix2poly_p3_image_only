@@ -94,13 +94,21 @@ def get_train_loader_p3(cfg,tokenizer=None,logger=None):
         
     sampler = DistributedSampler(dataset=train_ds, shuffle=cfg.run_type.name!='debug') if cfg.host.multi_gpu else None
 
+    # === OPTIM: DataLoader (étape 1) ===
+    # Ajouts vs original : drop_last=True (élimine le dernier batch incomplet, stabilise
+    # BatchNorm et évite les petits overheads de padding), persistent_workers=True (les
+    # workers ne sont pas relancés entre les époques), prefetch_factor=4 (chaque worker
+    # précharge 4 batches en avance). Conditionné sur num_workers>0 pour rester compatible
+    # avec le mode debug (num_workers=0).
     train_loader = DataLoader(
         train_ds,
         batch_size=cfg.experiment.model.batch_size,
         collate_fn=partial(get_collate_fn(cfg.experiment.model.name), cfg=cfg),
         num_workers=cfg.num_workers,
         pin_memory=cfg.run_type.name!='debug',
-        drop_last=False,
+        persistent_workers=(cfg.num_workers > 0),
+        prefetch_factor=4 if cfg.num_workers > 0 else None,
+        drop_last=True,
         sampler=sampler,
         shuffle=(sampler is None) and (cfg.run_type.name != 'debug')
     )
@@ -144,12 +152,17 @@ def get_val_loader_lidarpoly(cfg,tokenizer=None,logger=None):
 
     sampler = DistributedSampler(dataset=val_ds, shuffle=False) if cfg.host.multi_gpu else None
     
+    # === OPTIM: DataLoader val (étape 1) ===
+    # Ajouts vs original : persistent_workers=True, prefetch_factor=4.
+    # drop_last reste False en val pour évaluer toutes les images.
     val_loader = DataLoader(
         val_ds,
         batch_size=cfg.experiment.model.batch_size,
         collate_fn=partial(get_collate_fn(cfg.experiment.model.name), cfg=cfg),
         num_workers=cfg.num_workers,
         pin_memory=cfg.run_type.name!='debug',
+        persistent_workers=(cfg.num_workers > 0),
+        prefetch_factor=4 if cfg.num_workers > 0 else None,
         drop_last=False,
         sampler=sampler,
         shuffle=False
