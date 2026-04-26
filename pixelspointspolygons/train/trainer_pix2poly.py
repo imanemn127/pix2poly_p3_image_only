@@ -11,6 +11,7 @@ import json
 import shutil
 import torch
 import math
+import csv
 
 import torch.distributed as dist
 
@@ -28,6 +29,8 @@ from ..misc.coco_conversions import coco_anns_to_shapely_polys, tensor_to_shapel
 
 from .trainer import Trainer
 
+
+
 class Pix2PolyTrainer(Trainer):
         
     def setup_model(self):
@@ -40,7 +43,7 @@ class Pix2PolyTrainer(Trainer):
         grad_accum = getattr(cfg, "gradient_accumulation_steps", 1)
 
         # --- Optimizer (peak LR is cfg.learning_rate) ---
-        self.optimizer = optim.AdamW(
+                self.optimizer = optim.AdamW(
             self.model.parameters(),
             lr=cfg.learning_rate,
             weight_decay=cfg.weight_decay,
@@ -282,9 +285,10 @@ class Pix2PolyTrainer(Trainer):
 
     
     def train_one_epoch(self, epoch, iter_idx):
-        
+
+
         self.logger.info(f"Train epoch {epoch}...")
-        
+
         self.model.train()
         self.loss_fn_dict["coords"].train()
         self.loss_fn_dict["perm"].train()
@@ -315,14 +319,16 @@ class Pix2PolyTrainer(Trainer):
 
             sequence_pred, perm_pred = self.model(x_image, x_lidar, y_input)
 
-            coords_loss = self.cfg.experiment.model.vertex_loss_weight*self.loss_fn_dict["coords"](sequence_pred.reshape(-1, sequence_pred.shape[-1]), y_expected.reshape(-1))
-                
-                
-            perm_loss = self.cfg.experiment.model.perm_loss_weight*self.loss_fn_dict["perm"](perm_pred, y_perm)
-
+            coords_loss = self.cfg.experiment.model.vertex_loss_weight * self.loss_fn_dict["coords"](
+                sequence_pred.reshape(-1, sequence_pred.shape[-1]), y_expected.reshape(-1)
+            )
+            perm_loss = self.cfg.experiment.model.perm_loss_weight * self.loss_fn_dict["perm"](
+                perm_pred, y_perm
+            )
             loss = coords_loss + perm_loss
 
             self.optimizer.zero_grad(set_to_none=True)
+
             loss.backward()
             self.optimizer.step()
 
@@ -356,9 +362,22 @@ class Pix2PolyTrainer(Trainer):
             
         if self.cfg.checkpoint is not None:
             self.load_checkpoint()
-            
+
         if self.cfg.run_type.log_to_wandb and self.local_rank == 0:
             self.setup_wandb()
+
+
+        # ---------- CSV LOGGER INITIALIZATION ----------
+        if self.local_rank == 0:
+            csv_path = os.path.join(self.cfg.output_dir, "metrics.csv")
+            # Check if file exists to decide whether to write header
+            file_exists = os.path.isfile(csv_path)
+            self.csv_file = open(csv_path, 'a', newline='')
+            self.csv_writer = csv.writer(self.csv_file)
+            if not file_exists:
+                self.csv_writer.writerow(['epoch', 'train_loss', 'val_loss', 'val_iou'])
+        # ------------------------------------------------
+
 
         iter_idx=self.cfg.experiment.model.start_epoch * len(self.train_loader)
         epoch_iterator = range(self.cfg.experiment.model.start_epoch, self.cfg.experiment.model.num_epochs)
@@ -461,11 +480,26 @@ class Pix2PolyTrainer(Trainer):
                         self.logger.debug(f"{k}: {v}")
                         if self.cfg.run_type.log_to_wandb:
                             wandb.log(wandb_dict)
+
+
+                    # ---------- WRITE TO CSV ----------
+                    self.csv_writer.writerow([
+                        epoch,
+                        train_loss_dict['total_loss'],
+                        val_loss_dict['total_loss'],
+                        val_metrics_dict.get('IoU', float('nan'))
+                    ])
+                    self.csv_file.flush()
+                    # ----------------------------------
+
                             
                 # Sync all processes before next epoch
                 if self.is_ddp:
                     dist.barrier()
 
+        # after the epoch loop ends
+        if self.local_rank == 0:
+            self.csv_file.close()
 
 
 
