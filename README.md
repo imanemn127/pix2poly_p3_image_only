@@ -1,582 +1,341 @@
-<div align="center">
-    <h1 align="center">The P<sup>3</sup> Dataset: Pixels, Points and Polygons <br> for Multimodal Building Vectorization</h1>
-    <h3><align="center">Raphael Sulzer<sup>1,2</sup> &nbsp;&nbsp;&nbsp; Liuyun Duan<sup>1</sup>
-    &nbsp;&nbsp;&nbsp; Nicolas Girard<sup>1</sup>&nbsp;&nbsp;&nbsp; Florent Lafarge<sup>2</sup></a></h3>
-    <align="center"><sup>1</sup>LuxCarta Technology <br>  <sup>2</sup>Centre Inria d'Université Côte d'Azur
-    <img src="media/teaser.jpg" width=100% height=100%>
-    <b>Figure 1</b>: A view of our dataset of Zurich, Switzerland
-</div>
+# Pix2Poly (Image-Only) on NY Dataset – Reproducible Setup
 
-## Table of Contents
+This repository provides a minimal, reproducible pipeline to train and run inference with **Pix2Poly (image modality only)** from the P3 framework.
 
-- [Abstract](#abstract)
-- [Highlights](#highlights)
-- [Dataset](#dataset)
-- [Pretrained model weights](#pretrained-model-weights)
-- [Code](#code)
-- [Citation](#citation)
-- [Acknowledgements](#acknowledgements)
+👉 Original repository: https://github.com/raphaelsulzer/PixelsPointsPolygons
 
-## Abstract
+---
 
-<div align="justify">
-We present the P<sup>3</sup> dataset, a large-scale multimodal benchmark for building vectorization, constructed from aerial LiDAR point clouds, high-resolution aerial imagery, and vectorized 2D building outlines, collected across three continents. The dataset contains over 10 billion LiDAR points with decimeter-level accuracy and RGB images at a ground sampling distance of 25 cm. While many existing datasets primarily focus on the image modality, P<sup>3</sup> offers a complementary perspective by also incorporating dense 3D information. We demonstrate that LiDAR point clouds serve as a robust modality for predicting building polygons, both in hybrid and end-to-end learning frameworks. Moreover, fusing aerial LiDAR and imagery further improves accuracy and geometric quality of predicted polygons. The P<sup>3</sup> dataset is publicly available, along with code and pretrained weights of three state-of-the-art models for building polygon prediction at https://github.com/raphaelsulzer/PixelsPointsPolygons.
-</div>
+## Scope
 
-## Highlights
+- Image-only Pix2Poly (`p2p_image`)
+- Single-GPU training
+- **Full NY subset** (~43k images) – filtered from the complete P3 dataset
+- No LiDAR / no Open3D dependency
+- GPU inference (SSH workstation)
 
-- A global, multimodal dataset of aerial images, aerial LiDAR point clouds and building outline polygons, available at [huggingface.co/datasets/rsi/PixelsPointsPolygons](https://huggingface.co/datasets/rsi/PixelsPointsPolygons) 
-- A library for training and evaluating state-of-the-art deep learning methods on the dataset, available at [github.com/raphaelsulzer/PixelsPointsPolygons](https://github.com/raphaelsulzer/PixelsPointsPolygons)
-- Pretrained model weights, available at [huggingface.co/rsi/PixelsPointsPolygons](https://huggingface.co/rsi/PixelsPointsPolygons) 
-- A paper with an extensive experimental validation, available at [arxiv.org/abs/2505.15379](https://arxiv.org/abs/2505.15379)
+---
 
-## Dataset
+## Motivation
 
-### Overview
+The original implementation targets multimodal training (image + LiDAR) on a full dataset (~163GB), which introduces:
 
-<div align="left">
-    <img src="media/worldmap.jpg" width=60% height=50%>
-</div>
+- Broken imports (LiDAR dependencies)
+- Dataset inconsistencies (missing images)
+- Hydra path issues
+- Dependency conflicts
 
-### Download
+This repo provides a clean, minimal setup that actually works for image-only experiments on the **complete NY subset**.
 
-The recommended and fastest way to download the dataset is to run
+---
 
-```
-pip install huggingface_hub
-python scripts/download_dataset.py --dataset-root $DATA_ROOT/PixelsPointsPolygons_dataset
-```
+## Qualitative Results
 
-Optionally you can also download the dataset by running
+### Example Predictions (Pix2Poly – Image Only)
 
-```
-git lfs install
-git clone https://huggingface.co/datasets/rsi/PixelsPointsPolygons $DATA_ROOT/PixelsPointsPolygons_dataset
-```
+| Input Image | Predicted Polygons |
+|------------|------------------|
+| ![](media/input_example.png) | ![](media/prediction_example.png) |
 
-Both options will download the full dataset, including aerial images (as .tif), aerial lidar point clouds (as .copc.laz) and building polygon annotaions (as MS-COCO .json) into `$DATA_ROOT/PixelsPointsPolygons_dataset` . The size of the dataset is around 163GB.
+> Replace with your own outputs from `prediction_pix2poly_image.png`
 
-### Structure
+---
 
-<details>
-<summary>📁 Click to expand dataset folder structure</summary -->
+## Reproducibility Checklist
 
-```text
-PixelsPointsPolygons/data/224
-├── annotations
-│   ├── annotations_all_test.json
-│   ├── annotations_all_train.json
-│   └── annotations_all_val.json
-│       ... (24 files total)
-├── images
-│   ├── train
-│   │   ├── CH
-│   │   │   ├── 0
-│   │   │   │   ├── image0_CH_train.tif
-│   │   │   │   ├── image1000_CH_train.tif
-│   │   │   │   └── image1001_CH_train.tif
-│   │   │   │       ... (5000 files total)
-│   │   │   ├── 5000
-│   │   │   │   ├── image5000_CH_train.tif
-│   │   │   │   ├── image5001_CH_train.tif
-│   │   │   │   └── image5002_CH_train.tif
-│   │   │   │       ... (5000 files total)
-│   │   │   └── 10000
-│   │   │       ├── image10000_CH_train.tif
-│   │   │       ├── image10001_CH_train.tif
-│   │   │       └── image10002_CH_train.tif
-│   │   │           ... (5000 files total)
-│   │   │       ... (11 dirs total)
-│   │   ├── NY
-│   │   │   ├── 0
-│   │   │   │   ├── image0_NY_train.tif
-│   │   │   │   ├── image1000_NY_train.tif
-│   │   │   │   └── image1001_NY_train.tif
-│   │   │   │       ... (5000 files total)
-│   │   │   ├── 5000
-│   │   │   │   ├── image5000_NY_train.tif
-│   │   │   │   ├── image5001_NY_train.tif
-│   │   │   │   └── image5002_NY_train.tif
-│   │   │   │       ... (5000 files total)
-│   │   │   └── 10000
-│   │   │       ├── image10000_NY_train.tif
-│   │   │       ├── image10001_NY_train.tif
-│   │   │       └── image10002_NY_train.tif
-│   │   │           ... (5000 files total)
-│   │   │       ... (11 dirs total)
-│   │   └── NZ
-│   │       ├── 0
-│   │       │   ├── image0_NZ_train.tif
-│   │       │   ├── image1000_NZ_train.tif
-│   │       │   └── image1001_NZ_train.tif
-│   │       │       ... (5000 files total)
-│   │       ├── 5000
-│   │       │   ├── image5000_NZ_train.tif
-│   │       │   ├── image5001_NZ_train.tif
-│   │       │   └── image5002_NZ_train.tif
-│   │       │       ... (5000 files total)
-│   │       └── 10000
-│   │           ├── image10000_NZ_train.tif
-│   │           ├── image10001_NZ_train.tif
-│   │           └── image10002_NZ_train.tif
-│   │               ... (5000 files total)
-│   │           ... (11 dirs total)
-│   ├── val
-│   │   ├── CH
-│   │   │   └── 0
-│   │   │       ├── image0_CH_val.tif
-│   │   │       ├── image100_CH_val.tif
-│   │   │       └── image101_CH_val.tif
-│   │   │           ... (529 files total)
-│   │   ├── NY
-│   │   │   └── 0
-│   │   │       ├── image0_NY_val.tif
-│   │   │       ├── image100_NY_val.tif
-│   │   │       └── image101_NY_val.tif
-│   │   │           ... (529 files total)
-│   │   └── NZ
-│   │       └── 0
-│   │           ├── image0_NZ_val.tif
-│   │           ├── image100_NZ_val.tif
-│   │           └── image101_NZ_val.tif
-│   │               ... (529 files total)
-│   └── test
-│       ├── CH
-│       │   ├── 0
-│       │   │   ├── image0_CH_test.tif
-│       │   │   ├── image1000_CH_test.tif
-│       │   │   └── image1001_CH_test.tif
-│       │   │       ... (5000 files total)
-│       │   ├── 5000
-│       │   │   ├── image5000_CH_test.tif
-│       │   │   ├── image5001_CH_test.tif
-│       │   │   └── image5002_CH_test.tif
-│       │   │       ... (5000 files total)
-│       │   └── 10000
-│       │       ├── image10000_CH_test.tif
-│       │       ├── image10001_CH_test.tif
-│       │       └── image10002_CH_test.tif
-│       │           ... (4400 files total)
-│       ├── NY
-│       │   ├── 0
-│       │   │   ├── image0_NY_test.tif
-│       │   │   ├── image1000_NY_test.tif
-│       │   │   └── image1001_NY_test.tif
-│       │   │       ... (5000 files total)
-│       │   ├── 5000
-│       │   │   ├── image5000_NY_test.tif
-│       │   │   ├── image5001_NY_test.tif
-│       │   │   └── image5002_NY_test.tif
-│       │   │       ... (5000 files total)
-│       │   └── 10000
-│       │       ├── image10000_NY_test.tif
-│       │       ├── image10001_NY_test.tif
-│       │       └── image10002_NY_test.tif
-│       │           ... (4400 files total)
-│       └── NZ
-│           ├── 0
-│           │   ├── image0_NZ_test.tif
-│           │   ├── image1000_NZ_test.tif
-│           │   └── image1001_NZ_test.tif
-│           │       ... (5000 files total)
-│           ├── 5000
-│           │   ├── image5000_NZ_test.tif
-│           │   ├── image5001_NZ_test.tif
-│           │   └── image5002_NZ_test.tif
-│           │       ... (5000 files total)
-│           └── 10000
-│               ├── image10000_NZ_test.tif
-│               ├── image10001_NZ_test.tif
-│               └── image10002_NZ_test.tif
-│                   ... (4400 files total)
-├── lidar
-│   ├── train
-│   │   ├── CH
-│   │   │   ├── 0
-│   │   │   │   ├── lidar0_CH_train.copc.laz
-│   │   │   │   ├── lidar1000_CH_train.copc.laz
-│   │   │   │   └── lidar1001_CH_train.copc.laz
-│   │   │   │       ... (5000 files total)
-│   │   │   ├── 5000
-│   │   │   │   ├── lidar5000_CH_train.copc.laz
-│   │   │   │   ├── lidar5001_CH_train.copc.laz
-│   │   │   │   └── lidar5002_CH_train.copc.laz
-│   │   │   │       ... (5000 files total)
-│   │   │   └── 10000
-│   │   │       ├── lidar10000_CH_train.copc.laz
-│   │   │       ├── lidar10001_CH_train.copc.laz
-│   │   │       └── lidar10002_CH_train.copc.laz
-│   │   │           ... (5000 files total)
-│   │   │       ... (11 dirs total)
-│   │   ├── NY
-│   │   │   ├── 0
-│   │   │   │   ├── lidar0_NY_train.copc.laz
-│   │   │   │   ├── lidar10_NY_train.copc.laz
-│   │   │   │   └── lidar1150_NY_train.copc.laz
-│   │   │   │       ... (1071 files total)
-│   │   │   ├── 5000
-│   │   │   │   ├── lidar5060_NY_train.copc.laz
-│   │   │   │   ├── lidar5061_NY_train.copc.laz
-│   │   │   │   └── lidar5062_NY_train.copc.laz
-│   │   │   │       ... (2235 files total)
-│   │   │   └── 10000
-│   │   │       ├── lidar10000_NY_train.copc.laz
-│   │   │       ├── lidar10001_NY_train.copc.laz
-│   │   │       └── lidar10002_NY_train.copc.laz
-│   │   │           ... (4552 files total)
-│   │   │       ... (11 dirs total)
-│   │   └── NZ
-│   │       ├── 0
-│   │       │   ├── lidar0_NZ_train.copc.laz
-│   │       │   ├── lidar1000_NZ_train.copc.laz
-│   │       │   └── lidar1001_NZ_train.copc.laz
-│   │       │       ... (5000 files total)
-│   │       ├── 5000
-│   │       │   ├── lidar5000_NZ_train.copc.laz
-│   │       │   ├── lidar5001_NZ_train.copc.laz
-│   │       │   └── lidar5002_NZ_train.copc.laz
-│   │       │       ... (5000 files total)
-│   │       └── 10000
-│   │           ├── lidar10000_NZ_train.copc.laz
-│   │           ├── lidar10001_NZ_train.copc.laz
-│   │           └── lidar10002_NZ_train.copc.laz
-│   │               ... (4999 files total)
-│   │           ... (11 dirs total)
-│   ├── val
-│   │   ├── CH
-│   │   │   └── 0
-│   │   │       ├── lidar0_CH_val.copc.laz
-│   │   │       ├── lidar100_CH_val.copc.laz
-│   │   │       └── lidar101_CH_val.copc.laz
-│   │   │           ... (529 files total)
-│   │   ├── NY
-│   │   │   └── 0
-│   │   │       ├── lidar0_NY_val.copc.laz
-│   │   │       ├── lidar100_NY_val.copc.laz
-│   │   │       └── lidar101_NY_val.copc.laz
-│   │   │           ... (529 files total)
-│   │   └── NZ
-│   │       └── 0
-│   │           ├── lidar0_NZ_val.copc.laz
-│   │           ├── lidar100_NZ_val.copc.laz
-│   │           └── lidar101_NZ_val.copc.laz
-│   │               ... (529 files total)
-│   └── test
-│       ├── CH
-│       │   ├── 0
-│       │   │   ├── lidar0_CH_test.copc.laz
-│       │   │   ├── lidar1000_CH_test.copc.laz
-│       │   │   └── lidar1001_CH_test.copc.laz
-│       │   │       ... (5000 files total)
-│       │   ├── 5000
-│       │   │   ├── lidar5000_CH_test.copc.laz
-│       │   │   ├── lidar5001_CH_test.copc.laz
-│       │   │   └── lidar5002_CH_test.copc.laz
-│       │   │       ... (5000 files total)
-│       │   └── 10000
-│       │       ├── lidar10000_CH_test.copc.laz
-│       │       ├── lidar10001_CH_test.copc.laz
-│       │       └── lidar10002_CH_test.copc.laz
-│       │           ... (4400 files total)
-│       ├── NY
-│       │   ├── 0
-│       │   │   ├── lidar0_NY_test.copc.laz
-│       │   │   ├── lidar1000_NY_test.copc.laz
-│       │   │   └── lidar1001_NY_test.copc.laz
-│       │   │       ... (4964 files total)
-│       │   ├── 5000
-│       │   │   ├── lidar5000_NY_test.copc.laz
-│       │   │   ├── lidar5001_NY_test.copc.laz
-│       │   │   └── lidar5002_NY_test.copc.laz
-│       │   │       ... (4953 files total)
-│       │   └── 10000
-│       │       ├── lidar10000_NY_test.copc.laz
-│       │       ├── lidar10001_NY_test.copc.laz
-│       │       └── lidar10002_NY_test.copc.laz
-│       │           ... (4396 files total)
-│       └── NZ
-│           ├── 0
-│           │   ├── lidar0_NZ_test.copc.laz
-│           │   ├── lidar1000_NZ_test.copc.laz
-│           │   └── lidar1001_NZ_test.copc.laz
-│           │       ... (5000 files total)
-│           ├── 5000
-│           │   ├── lidar5000_NZ_test.copc.laz
-│           │   ├── lidar5001_NZ_test.copc.laz
-│           │   └── lidar5002_NZ_test.copc.laz
-│           │       ... (5000 files total)
-│           └── 10000
-│               ├── lidar10000_NZ_test.copc.laz
-│               ├── lidar10001_NZ_test.copc.laz
-│               └── lidar10002_NZ_test.copc.laz
-│                   ... (4400 files total)
-└── ffl
-    ├── train
-    │   ├── CH
-    │   │   ├── 0
-    │   │   │   ├── image0_CH_train.pt
-    │   │   │   ├── image1000_CH_train.pt
-    │   │   │   └── image1001_CH_train.pt
-    │   │   │       ... (5000 files total)
-    │   │   ├── 5000
-    │   │   │   ├── image5000_CH_train.pt
-    │   │   │   ├── image5001_CH_train.pt
-    │   │   │   └── image5002_CH_train.pt
-    │   │   │       ... (5000 files total)
-    │   │   └── 10000
-    │   │       ├── image10000_CH_train.pt
-    │   │       ├── image10001_CH_train.pt
-    │   │       └── image10002_CH_train.pt
-    │   │           ... (5000 files total)
-    │   │       ... (11 dirs total)
-    │   ├── NY
-    │   │   ├── 0
-    │   │   │   ├── image0_NY_train.pt
-    │   │   │   ├── image1000_NY_train.pt
-    │   │   │   └── image1001_NY_train.pt
-    │   │   │       ... (5000 files total)
-    │   │   ├── 5000
-    │   │   │   ├── image5000_NY_train.pt
-    │   │   │   ├── image5001_NY_train.pt
-    │   │   │   └── image5002_NY_train.pt
-    │   │   │       ... (5000 files total)
-    │   │   └── 10000
-    │   │       ├── image10000_NY_train.pt
-    │   │       ├── image10001_NY_train.pt
-    │   │       └── image10002_NY_train.pt
-    │   │           ... (5000 files total)
-    │   │       ... (11 dirs total)
-    │   ├── NZ
-    │   │   ├── 0
-    │   │   │   ├── image0_NZ_train.pt
-    │   │   │   ├── image1000_NZ_train.pt
-    │   │   │   └── image1001_NZ_train.pt
-    │   │   │       ... (5000 files total)
-    │   │   ├── 5000
-    │   │   │   ├── image5000_NZ_train.pt
-    │   │   │   ├── image5001_NZ_train.pt
-    │   │   │   └── image5002_NZ_train.pt
-    │   │   │       ... (5000 files total)
-    │   │   └── 10000
-    │   │       ├── image10000_NZ_train.pt
-    │   │       ├── image10001_NZ_train.pt
-    │   │       └── image10002_NZ_train.pt
-    │   │           ... (5000 files total)
-    │   │       ... (11 dirs total)
-    │   ├── processed-flag-all
-    │   ├── processed-flag-CH
-    │   └── processed-flag-NY
-    │       ... (8 files total)
-    ├── val
-    │   ├── CH
-    │   │   └── 0
-    │   │       ├── image0_CH_val.pt
-    │   │       ├── image100_CH_val.pt
-    │   │       └── image101_CH_val.pt
-    │   │           ... (529 files total)
-    │   ├── NY
-    │   │   └── 0
-    │   │       ├── image0_NY_val.pt
-    │   │       ├── image100_NY_val.pt
-    │   │       └── image101_NY_val.pt
-    │   │           ... (529 files total)
-    │   ├── NZ
-    │   │   └── 0
-    │   │       ├── image0_NZ_val.pt
-    │   │       ├── image100_NZ_val.pt
-    │   │       └── image101_NZ_val.pt
-    │   │           ... (529 files total)
-    │   ├── processed-flag-all
-    │   ├── processed-flag-CH
-    │   └── processed-flag-NY
-    │       ... (8 files total)
-    └── test
-        ├── CH
-        │   ├── 0
-        │   │   ├── image0_CH_test.pt
-        │   │   ├── image1000_CH_test.pt
-        │   │   └── image1001_CH_test.pt
-        │   │       ... (5000 files total)
-        │   ├── 5000
-        │   │   ├── image5000_CH_test.pt
-        │   │   ├── image5001_CH_test.pt
-        │   │   └── image5002_CH_test.pt
-        │   │       ... (5000 files total)
-        │   └── 10000
-        │       ├── image10000_CH_test.pt
-        │       ├── image10001_CH_test.pt
-        │       └── image10002_CH_test.pt
-        │           ... (4400 files total)
-        ├── NY
-        │   ├── 0
-        │   │   ├── image0_NY_test.pt
-        │   │   ├── image1000_NY_test.pt
-        │   │   └── image1001_NY_test.pt
-        │   │       ... (5000 files total)
-        │   ├── 5000
-        │   │   ├── image5000_NY_test.pt
-        │   │   ├── image5001_NY_test.pt
-        │   │   └── image5002_NY_test.pt
-        │   │       ... (5000 files total)
-        │   └── 10000
-        │       ├── image10000_NY_test.pt
-        │       ├── image10001_NY_test.pt
-        │       └── image10002_NY_test.pt
-        │           ... (4400 files total)
-        ├── NZ
-        │   ├── 0
-        │   │   ├── image0_NZ_test.pt
-        │   │   ├── image1000_NZ_test.pt
-        │   │   └── image1001_NZ_test.pt
-        │   │       ... (5000 files total)
-        │   ├── 5000
-        │   │   ├── image5000_NZ_test.pt
-        │   │   ├── image5001_NZ_test.pt
-        │   │   └── image5002_NZ_test.pt
-        │   │       ... (5000 files total)
-        │   └── 10000
-        │       ├── image10000_NZ_test.pt
-        │       ├── image10001_NZ_test.pt
-        │       └── image10002_NZ_test.pt
-        │           ... (4400 files total)
-        ├── processed-flag-all
-        ├── processed-flag-CH
-        └── processed-flag-NY
-            ... (8 files total)
-```
+To fully reproduce results:
 
-</details>
-
-## Pretrained model weights
-
-### Download
-
-The recommended and fastest way to download the pretrained model weights is to run
-
-```
-python scripts/download_pretrained.py --model-root $MODEL_ROOT/PixelsPointsPolygons_output
-```
-
-Optionally you can also download the weights by running
-
-```
-git clone https://huggingface.co/rsi/PixelsPointsPolygons $MODEL_ROOT/PixelsPointsPolygons_output
-```
-
-Both options will download all checkpoints (as .pth) and results presented in the paper (as MS-COCO .json) into `$MODEL_ROOT/PixelsPointsPolygons_output` .
-
-## Code
-
-### Download
-
-```
-git clone https://github.com/raphaelsulzer/PixelsPointsPolygons
-```
-
-### Installation
-
-To create a conda environment named `p3` and install the repository as a python package with all dependencies run
-```
-bash install.sh
-```
-
-or, if you want to manage the environment yourself run
-```
-pip install torch==2.2.2 torchvision==0.17.2 torchaudio==2.2.2
-pip install .
-```
-⚠️ **Warning**: The implementation of the LiDAR point cloud encoder uses Open3D-ML. Currently, Open3D-ML officially only supports the PyTorch version specified above.
-
+### Environment
+- [ ] Python 3.11
+- [ ] PyTorch 2.2.2
+- [ ] transformers==4.38.2
+- [ ] CUDA available (or CPU fallback)
 
 ### Setup
+- [ ] Repository cloned
+- [ ] Conda environment created on large disk
+- [ ] Project installed with `pip install -e .`
 
-The project supports hydra configuration which allows to modify any parameter either from a `.yaml` file or directly from the command line.
+### Code Fixes
+- [ ] LiDAR imports removed
+- [ ] No Open3D dependency
+- [ ] `shared_utils.py` patched
 
-To setup the project structure we recommend to specify your `$DATA_ROOT` and `$MODEL_ROOT` in `config/host/default.yaml`.
+### Dataset (Full NY)
+- [ ] Full P3 dataset available at `/mnt/DATA/IMANE/PixelsPointsPolygons_dataset/data/224/`
+- [ ] NY‑only annotations filtered using `filter_ny_only.py`
+- [ ] `p3_NY_full` directory with symlink to images
+- [ ] Configs point to `p3_NY_full`
 
-To view all available configuration options run
-```
-python scripts/train.py --help
-```
+### Config
+- [ ] Absolute paths set (Hydra)
+- [ ] Backbone checkpoint path valid
+- [ ] No broken logger interpolation
 
+### Training
+- [ ] Runs without crash (tmux, wandb offline, OOM avoided)
+- [ ] Visualization bug fixed
+- [ ] CSV logging enabled (`metrics.csv`)
 
-### Predict demo tile
+### Inference
+- [ ] GPU inference works
+- [ ] Output image generated
 
-After downloading the model weights and setting up the code you can predict a demo tile by running
+---
 
-```
-python scripts/predict_demo.py checkpoint=best_val_iou experiment=$MODEL_$MODALITY +image_file=demo_data/image0_CH_val.tif +lidar_file=demo_data/lidar0_CH_val.copc.laz
-```
-At least one of `image_file` or `lidar_file` has to be specified. `$MODEL` can be one of the following: `ffl`, `hisup` or `p2p`. `$MODALITY` can be `image`, `lidar` or `fusion`.
-The result will be stored in `prediction.png`.
+## Environment
 
-For example, for Pix2Poly demo predictions the results should look like this:
+- Linux (remote workstation via SSH)
+- No sudo access
+- Single GPU used
 
-<p align="center">
+---
 
-| ![Pred. Image](media/Switzerland_val_0_pix2poly_v4_image_vit_bs4x16.jpg) | ![Pred. LiDAR](media/Switzerland_val_0_pix2poly_lidar_pp_vit_bs2x16_mnv64.jpg) | ![Pred. Fusion](media/Switzerland_val_0_pix2poly_early_fusion_bs2x16_mnv64.jpg) |
-| :-----------------------------------------------------------------------: | :-------------------------------------------------------------------------: | :------------------------------------------------------------------------: |
-| <sub>Pred. Image</sub>                                                    | <sub>Pred. LiDAR</sub>                                                      | <sub>Pred. Fusion</sub>                                                     |
+## Installation
 
-</p>
-
-
-### Reproduce paper results
-
-To reproduce the results from the paper you can run the following commands
-
-```
-python scripts/modality_ablation.py
-python scripts/lidar_density_ablation.py
-python scripts/all_countries.py
-```
-
-### Custom training, prediction and evaluation
-
-We recommend to first setup a custom experiment file `$EXP_FILE` in `config/experiment/` following the structure of one of the existing files, e.g. `ffl_fusion.yaml`. You can then run
-
-```
-# train your model (on multiple GPUs)
-torchrun --nproc_per_node=$NUM_GPU scripts/train.py experiment=$EXP_FILE
-
-# predict the test set with your model (on multiple GPUs)
-torchrun --nproc_per_node=$NUM_GPU scripts/predict.py experiment=$EXP_FILE evaluation=test checkpoint=best_val_iou
-
-# evaluate your prediction of the test set
-python scripts/evaluate.py experiment=$EXP_FILE evaluation=test checkpoint=best_val_iou
+```bash
+git clone https://github.com/raphaelsulzer/PixelsPointsPolygons
+cd PixelsPointsPolygons
 ```
 
-You could also continue training from a provided pretrained model with
-
-```
-# train your model (on a single GPU)
-python scripts/train.py experiment=p2p_fusion checkpoint=latest
+```bash
+conda create --prefix /mnt/DATA/IMANE/p3 python=3.11.11 -y
+conda activate /mnt/DATA/IMANE/p3
 ```
 
-## Citation
+```bash
+pip install torch==2.2.2 torchvision==0.17.2 torchaudio==2.2.2
+pip install -e .
+pip install transformers==4.38.2
+```
 
-If you use our work please cite
+---
+
+##  Required Fixes
+
+### Disable LiDAR modules
+
+`models/pointpillars/__init__.py`
+
+```python
+# from .pointpillars_o3d import PointPillarsEncoder, PointPillars
+```
+
+`models/pix2poly/model_pix2poly.py`
+
+```python
+# from ..pointpillars import PointPillarsViT
+from ..vision_transformer import ViT, ViTDINOv2
+# from ..fusion_layers import EarlyFusionViT
+```
+
+---
+
+### Use absolute paths
+
+`config/host/default.yaml`
+
+```yaml
+data_root: /mnt/DATA/IMANE/p3_NY/data
+model_root: /mnt/DATA/IMANE
+```
+
+---
+
+##  Dataset Preparation – Full NY Subset
+
+The complete P3 dataset contains images from multiple countries. We extract only NY images.
+
+### 1. Filter NY‑only annotations
+
+Create and run filter_ny_only.py inside `/mnt/DATA/IMANE/PixelsPointsPolygons_dataset/data/224/annotations/blocks/` :
+
+```python
+import json, os
+
+for split in ['train', 'val', 'test']:
+    with open(f'annotations_all_{split}.json') as f:
+        data = json.load(f)
+
+    # Keep images where file_name contains '/NY/'
+    ny_imgs = [img for img in data['images'] if '/NY/' in img['file_name']]
+    ny_ids = {img['id'] for img in ny_imgs}
+    ny_anns = [a for a in data['annotations'] if a['image_id'] in ny_ids]
+
+    out = {'images': ny_imgs, 'annotations': ny_anns}
+    with open(f'annotations_NY_{split}.json', 'w') as f:
+        json.dump(out, f)
+```
+Results:
+
+* Train: 43,333 images, 142,556 annotations
+* Val: 529 images, 2,352 annotations
+* Test: 14,313 images, 51,757 annotations
+
+### 2. Create p3_NY_full directory structure
+
+```bash
+mkdir -p /mnt/DATA/IMANE/p3_NY_full/data/224
+ln -s /mnt/DATA/IMANE/PixelsPointsPolygons_dataset/data/224/images \
+      /mnt/DATA/IMANE/p3_NY_full/data/224/images
+mkdir -p /mnt/DATA/IMANE/p3_NY_full/data/224/annotations/blocks
+```
+
+Copy the filtered JSON files into `p3_NY_full/data/224/annotations/blocks/`.
+
+### 3. Update Hydra configs
+
+`config/host/default.yaml`
+
+```yaml
+data_root: /mnt/DATA/IMANE/p3_NY_full/data
+
+config/dataset/p3.yaml
+yaml
+
+in_path: /mnt/DATA/IMANE/p3_NY_full/data/224
+annotations:
+  train: /mnt/DATA/IMANE/p3_NY_full/data/224/annotations/blocks/annotations_NY_train.json
+  val:   /mnt/DATA/IMANE/p3_NY_full/data/224/annotations/blocks/annotations_NY_val.json
+  test:  /mnt/DATA/IMANE/p3_NY_full/data/224/annotations/blocks/annotations_NY_test.json
+```
+
+---
+
+##  Pretrained Backbone
+
+```bash
+mkdir -p /mnt/DATA/IMANE/PixelsPointsPolygons_output/backbones
+
+wget https://huggingface.co/rsi/PixelsPointsPolygons/resolve/main/backbones/dino_deitsmall8_pretrain.pth
+```
+
+---
+
+##  Training
+
+```bash
+export CUDA_VISIBLE_DEVICES=0
+
+python scripts/train.py experiment=p2p_image
+```
+
+Resume:
+
+```bash
+tmux new-session -d -s train_full_ny "bash -c '
+  export CUDA_VISIBLE_DEVICES=0 WANDB_MODE=offline &&
+  cd /mnt/DATA/IMANE/PixelsPointsPolygons &&
+  /mnt/DATA/IMANE/p3/bin/python scripts/train.py \
+    experiment=p2p_image \
+    checkpoint=latest \
+    experiment.model.num_epochs=400 \
+  2>&1 | tee /mnt/DATA/IMANE/train_full_ny.log'"```
+```
+
+* Resume from checkpoint (epoch 199)
+* Train for 400 epochs total
+* Logs saved to train_full_ny.log and metrics.csv inside the output directory
+
+
+---
+## Monitoring
+
+```bash
+
+# GPU usage
+watch -n 1 nvidia-smi
+
+# Real‑time training log
+tail -f /mnt/DATA/IMANE/train_full_ny.log
+
+# Plot loss and IoU curves (run anytime)
+python /mnt/DATA/IMANE/plot_losses.py
+```
+
+The plot_losses.py script reads metrics.csv and produces a two‑panel figure:
+(left) train/val loss, (right) validation IoU
+```
+
+---
+
+##  Critical Fix for get_tile_names_from_dataloader
+
+```python
+def get_tile_names_from_dataloader(loader, ids):
+    imgs_dict = loader.dataset.coco.imgs
+    names = []
+
+    for img_id in ids:
+        img_info = imgs_dict.get(img_id)
+
+        if img_info is None:
+            names.append(f"unknown_{img_id}")
+            continue
+
+        name = img_info['file_name'].split('/')[-1].replace('.tif', '')
+        names.append(name)
+    return names
+```
+
+---
+
+##  Inference (GPU)
+
+```bash
+export CUDA_VISIBLE_DEVICES=0
+
+python scripts/predict_demo.py \
+  checkpoint=best_val_iou \
+  experiment=p2p_image \
+  host.device=cuda \
+  +image_file=demo_data/image0_CH_val.tif
+```
+
+---
+
+##  Common Issues
+
+| Issue              | Fix                  |
+| ------------------ | -------------------- |
+| open3d error       | remove LiDAR imports |
+| Hydra path errors       | use absolute paths   |
+| transformers error | downgrade version    |
+| IndexError in utils         | Patch get_tile_names_from_dataloader          |
+| tmux session dies silently  | Use full Python path, not conda activate
+|  wandb authentication failure|  export WANDB_MODE=offline
+
+---
+
+##  Notes
+
+* Works without LiDAR
+* Optimized for full NY dataset (43k images)
+* Easily extendable to other countries (CH, NZ, etc.) by modifying the filter script
+* All changes are tracked in git commits for reproducibility
+
+---
+
+##  Citation
+
 ```bibtex
 @misc{sulzer2025p3datasetpixelspoints,
-      title={The P$^3$ Dataset: Pixels, Points and Polygons for Multimodal Building Vectorization}, 
-      author={Raphael Sulzer and Liuyun Duan and Nicolas Girard and Florent Lafarge},
-      year={2025},
-      eprint={2505.15379},
-      archivePrefix={arXiv},
-      primaryClass={cs.CV},
-      url={https://arxiv.org/abs/2505.15379}, 
+  title={The P$^3$ Dataset: Pixels, Points and Polygons},
+  author={Raphael Sulzer et al.},
+  year={2025}
 }
 ```
 
-## Acknowledgements
+---
 
-This repository benefits from the following open-source work. We thank the authors for their great work.
+##  Acknowledgement
 
-1. [Frame Field Learning](https://github.com/Lydorn/Polygonization-by-Frame-Field-Learning)
-2. [HiSup](https://github.com/SarahwXU/HiSup)
-3. [Pix2Poly](https://github.com/yeshwanth95/Pix2Poly)
+All credit to the original authors:
+
+[https://github.com/raphaelsulzer/PixelsPointsPolygons](https://github.com/raphaelsulzer/PixelsPointsPolygons)
 
 
-## License
 
-The dataset is publish under the CC-BY-4.0 license. The code and pretrained models are published under an academic non-commerical license. See [LICENSE.md](LICENSE.md) for additional details.
+
+
+
