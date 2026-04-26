@@ -11,5 +11,5 @@ project_name: HiSup
 lidar_dropout: null
 
 dataset:
-  country: CH
+  country: NY
   annotation_type: blocks

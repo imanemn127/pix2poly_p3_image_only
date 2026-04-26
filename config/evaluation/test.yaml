@@ -7,4 +7,4 @@ modes:
     - iou
     - polis
     - mta
-eval_file: results/metrics
+eval_file: /mnt/DATA/IMANE/PixelsPointsPolygons_output/results/metrics

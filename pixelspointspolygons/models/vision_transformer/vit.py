@@ -34,8 +34,8 @@ class ViT(nn.Module):
             # checkpoint_path=cfg.experiment.encoder.checkpoint_file
         )
         
-        if cfg.experiment.encoder.vit.pretrained:
-            self.vit.load_state_dict(torch.load(cfg.experiment.encoder.vit.checkpoint_file, map_location=self.cfg.host.device), strict=False)
+        if cfg.experiment.encoder.pretrained:
+    	    self.vit.load_state_dict(torch.load(cfg.experiment.encoder.checkpoint_file, map_location=self.cfg.host.device), strict=False)
                 
         if bottleneck:
             self.bottleneck = nn.AdaptiveAvgPool1d(cfg.experiment.encoder.out_feature_dim)

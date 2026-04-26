@@ -3,4 +3,4 @@ pred_file: ${..output_dir}/predictions_${..experiment.dataset.country}_${.split}
 modes:
   - iou
   # - subset_iou
-eval_file: results/metrics
+eval_file: /mnt/DATA/IMANE/PixelsPointsPolygons_output/results/metrics

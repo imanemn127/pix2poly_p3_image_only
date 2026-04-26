@@ -108,12 +108,18 @@ class Trainer:
 
     def save_checkpoint(self, outfile, **kwargs):
         """Save checkpoint to file. This is a generic function that saves the model, optimizer and scheduler state dicts."""
-        
+
         os.makedirs(os.path.dirname(outfile), exist_ok=True)
-        
+
+        # === OPTIM: compatibilité torch.compile pour la sauvegarde (étape 3) ===
+        # torch.compile wraps le modèle dans un OptimizedModule qui ne peut pas être
+        # sérialisé directement. _orig_mod pointe vers le module PyTorch original.
+        # getattr(..., self.model) est un no-op si compile n'est pas utilisé.
+        model_to_save = getattr(self.model, '_orig_mod', self.model)
+
         checkpoint = {
             "cfg": self.cfg,
-            "model": self.model.state_dict(),
+            "model": model_to_save.state_dict(),
             "optimizer": self.optimizer.state_dict(),
             "lr_scheduler": self.lr_scheduler.state_dict(),
             **kwargs

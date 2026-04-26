@@ -1,7 +1,9 @@
 import hydra
 import os
 
-from pixelspointspolygons.predict import FFLPredictor, HiSupPredictor, Pix2PolyPredictor
+from pixelspointspolygons.predict import Pix2PolyPredictor
+FFLPredictor = None
+HiSupPredictor = None
 from pixelspointspolygons.misc.shared_utils import setup_ddp, setup_hydraconf
 
 

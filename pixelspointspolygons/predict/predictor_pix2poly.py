@@ -100,7 +100,7 @@ class Pix2PolyPredictor(Predictor):
         with torch.no_grad():
             
             if self.cfg.experiment.encoder.use_images:
-                image = image.to(self.device, non_blocking=True)
+                image = image.to("cpu", non_blocking=True)
             if self.cfg.experiment.encoder.use_lidar:
                 lidar = lidar.to(self.device, non_blocking=True)
             

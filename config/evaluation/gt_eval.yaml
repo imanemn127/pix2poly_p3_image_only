@@ -6,4 +6,4 @@ modes:
     - coco
     - iou
     - polis
-eval_file: results/metrics
+eval_file: /mnt/DATA/IMANE/PixelsPointsPolygons_output/results/metrics

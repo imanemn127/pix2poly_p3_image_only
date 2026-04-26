@@ -24,5 +24,3 @@ hydra:
     dir: ${...output_dir}
 
 
-
-

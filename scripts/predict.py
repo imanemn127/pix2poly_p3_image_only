@@ -2,7 +2,7 @@ import hydra
 import pandas as pd
 
 from pixelspointspolygons.eval import Evaluator
-from pixelspointspolygons.predict import FFLPredictor, HiSupPredictor, Pix2PolyPredictor
+from pixelspointspolygons.predict import Pix2PolyPredictor
 from pixelspointspolygons.misc.shared_utils import setup_ddp, setup_hydraconf
 
 @hydra.main(config_path="../config", config_name="config", version_base="1.3")
@@ -13,11 +13,11 @@ def main(cfg):
     
     print(f"Predict {cfg.experiment.model.name}/{cfg.experiment.name} on {cfg.experiment.dataset.country}/{cfg.evaluation.split}")
     
-    
     if cfg.experiment.model.name == "ffl":
-        predictor = FFLPredictor(cfg, local_rank, world_size)
+        # We don't use FFL, so if it's somehow called, raise an error
+        raise NotImplementedError("FFL model not available in this environment")
     elif cfg.experiment.model.name == "hisup":
-        predictor = HiSupPredictor(cfg, local_rank, world_size)
+        raise NotImplementedError("HiSup model not available in this environment")
     elif cfg.experiment.model.name == "pix2poly":
         predictor = Pix2PolyPredictor(cfg, local_rank, world_size)
     else:
@@ -31,14 +31,10 @@ def main(cfg):
     ee.pbar_disable = False
     ee.load_gt(cfg.experiment.dataset.annotations[cfg.evaluation.split])
     ee.load_predictions(cfg.evaluation.pred_file)
-    res=ee.evaluate()
+    res = ee.evaluate()
     
     df = pd.DataFrame.from_dict(res, orient='index')
-    
-    print("\n")
-    print(df)
-    print("\n")
-    
+    print("\n", df, "\n")
     print(f"Save eval file to {cfg.evaluation.eval_file}")
     df.to_csv(cfg.evaluation.eval_file, index=True, float_format="%.3g")
         
