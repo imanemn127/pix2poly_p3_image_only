@@ -180,11 +180,21 @@ def get_lr(optimizer):
 
 
 def get_tile_names_from_dataloader(loader, ids):
+    # ids are original COCO image IDs, not array indices
+    imgs_dict = loader.dataset.coco.imgs
     names = []
-    # img_infos = loader.dataset.coco.loadImgs(ids)
-    img_infos = np.array(list(loader.dataset.coco.imgs.values()))[ids]
-    for i in range(len(ids)):
-        names.append(img_infos[i]["file_name"].split("/")[-1].split(".")[0])
+    for img_id in ids:
+        img_info = imgs_dict.get(img_id)
+        if img_info is None:
+            # fallback to index if ID not found (for older datasets)
+            all_imgs = list(imgs_dict.values())
+            if img_id < len(all_imgs):
+                img_info = all_imgs[img_id]
+            else:
+                names.append(f"unknown_{img_id}")
+                continue
+        name = img_info['file_name'].split('/')[-1].replace('.tif', '')
+        names.append(name)
     return names
 
 def plot_model_architecture(model, input_shape=(16,3,224,224), outfile="/data/rsulzer/model_architecture.svg"):
