@@ -1,8 +1,6 @@
 # Pix2Poly (Image-Only) – Reproducible Setup for the NY Subset
 
-> **This is not a reimplementation.**
-> This repository is a **reproducible setup and patch layer** built on top of the original [PixelsPointsPolygons (P3)](https://github.com/raphaelsulzer/PixelsPointsPolygons) codebase by Raphael Sulzer et al.
-> It documents the minimal code fixes, dataset preparation steps, and configuration changes required to run **image-only Pix2Poly** training and inference on the **New York (NY) subset** of the P3 dataset, without any LiDAR or Open3D dependency.
+**This is not a reimplementation.** This repository is a **reproducible setup and patch layer** built on top of the original [PixelsPointsPolygons (P3)](https://github.com/raphaelsulzer/PixelsPointsPolygons) codebase by Raphael Sulzer et al. It documents the minimal code fixes, dataset preparation steps, and configuration changes required to run **image-only Pix2Poly** training and inference on the **New York (NY) subset** of the P3 dataset, without any LiDAR or Open3D dependency.
 
 ---
 
@@ -485,41 +483,39 @@ python scripts/predict_demo.py \
   checkpoint=best_val_iou \
   experiment=p2p_image \
   host.device=cuda \
-  +image_file=demo_data/image0_CH_val.tif
+  +image_file=demo_data/image0_NY_val.tif
 ```
 
 **What this produces:**
 - A visualization image saved as `prediction_pix2poly_image.png` in the current directory (or the configured output directory)
 - Predicted building polygons overlaid on the input image
 
-> To run on your own image, replace `demo_data/image0_CH_val.tif` with the path to a `.tif` file in the same format as the P3 dataset (224×224 px, RGB).
+> To run on your own image, replace `demo_data/image0_NY_val.tif` with the path to a `.tif` file in the same format as the P3 dataset (224×224 px, RGB).
 
 ---
 
 ## Expected Results
 
-> These are approximate reference values. Exact numbers will vary by GPU, random seed, and dataset version.
+Results from my run on the NY subset, single A100, stopped at epoch 160 (out of 200 configured) once val IoU had converged:
 
-| Metric | Approximate Value |
-|--------|------------------|
-| Training time (400 epochs, A100) | ~48–72 hours |
-| Training time (400 epochs, V100) | ~72–96 hours |
-| Best validation IoU | ~0.55–0.65 |
-| GPU memory usage | ~18–24 GB |
+| Metric | Value |
+|--------|-------|
+| Best validation IoU | **0.831** (epoch 139) |
+| Val IoU at early stopping (epoch 159) | 0.815 |
+| Training loss at stop | ~1.53 |
+| Epochs run | 160 / 200 (stopped early — converged) |
 
-Results on other country subsets (CH, NZ) are expected to be similar but have not been systematically evaluated with this setup.
+Val IoU reached ~0.80 around epoch 79 and plateaued in the 0.81–0.83 range from epoch 84 onward with no meaningful improvement after epoch 139.
+
+Results on other country subsets (CH, NZ) have not been evaluated with this setup.
 
 ---
 
 ## Qualitative Results
 
-### Example Predictions (Pix2Poly – Image Only)
+Validation sample at epoch 159 (NY subset). Left: ground truth polygons. Right: model predictions.
 
-| Input Image | Predicted Polygons |
-|-------------|-------------------|
-| ![Input example](media/input_example.png) | ![Prediction example](media/prediction_example.png) |
-
-> Replace the placeholder images above with actual outputs from your run (`prediction_pix2poly_image.png`). Outputs should show predicted building footprint polygons overlaid on the input aerial image.
+![Val prediction example](media/val_prediction_example.png)
 
 ---
 
@@ -588,11 +584,11 @@ print(data['images'][0]['file_name'])  # should match your images/ directory
 - [ ] Full training runs without crash
 - [ ] `metrics.csv` is being written to the timestamped output directory
 - [ ] `best_val_iou.json` is updated after each best epoch
+- [ ] `plot_losses_auto.py` generates `loss_curves.png` from `metrics.csv`
 
 ### Inference
 - [ ] `predict_demo.py` runs on a sample image
 - [ ] Output image (`prediction_pix2poly_image.png`) is generated
-- [ ] `plot_losses_auto.py` generates `loss_curves.png` from `metrics.csv`
 
 ---
 
@@ -616,4 +612,3 @@ All credit for the original model, dataset, and codebase belongs to the P3 autho
 
 [https://github.com/raphaelsulzer/PixelsPointsPolygons](https://github.com/raphaelsulzer/PixelsPointsPolygons)
 
-This repository only provides a reproducible configuration layer on top of their work.
