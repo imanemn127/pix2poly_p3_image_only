@@ -472,7 +472,7 @@ class Pix2PolyTrainer(Trainer):
             
             with torch.no_grad():
                 if self.local_rank == 0:
-                    self.visualization(self.train_loader,epoch,predictor=predictor)
+                    self.visualization(self.train_viz_loader,epoch,predictor=predictor)
                     wandb_dict ={}
                     wandb_dict['epoch'] = epoch
                     for k, v in train_loss_dict.items():

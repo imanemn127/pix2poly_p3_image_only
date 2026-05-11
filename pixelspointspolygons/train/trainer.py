@@ -17,7 +17,7 @@ from tqdm import tqdm
 from omegaconf import OmegaConf
 
 from ..misc import make_logger, seed_everything, smart_load_state_dict
-from ..datasets import get_train_loader, get_val_loader
+from ..datasets import get_train_loader, get_val_loader, get_train_viz_loader
 
 class Trainer:
     def __init__(self, cfg, local_rank, world_size):
@@ -43,6 +43,7 @@ class Trainer:
         self.model = None
         self.optimizer = None
         self.train_loader = None
+        self.train_viz_loader = None
         self.val_loader = None
         self.lr_scheduler = None
         self.loss_fn_dict = {}
@@ -104,6 +105,7 @@ class Trainer:
     
     def setup_dataloader(self):
         self.train_loader = get_train_loader(self.cfg, logger=self.logger, tokenizer=self.tokenizer)
+        self.train_viz_loader = get_train_viz_loader(self.cfg, logger=self.logger, tokenizer=self.tokenizer)
         self.val_loader = get_val_loader(self.cfg, logger=self.logger, tokenizer=self.tokenizer)
 
     def save_checkpoint(self, outfile, **kwargs):

@@ -319,8 +319,50 @@ def get_val_loader_inria(cfg,tokenizer,logger=None):
         sampler=sampler,
         shuffle=False
     )
-    
+
     return val_loader
 
 
+def get_train_viz_loader(cfg, tokenizer=None, logger=None):
+    """Train visualization loader — TrainDataset with val-style transforms (no augmentations).
+    Uses split='train' so outputs go to visualizations/train/, separate from val/."""
+    transforms = []
+    if cfg.experiment.encoder.augmentations is not None:
+        if "Resize" in cfg.experiment.encoder.augmentations:
+            transforms.append(A.Resize(height=cfg.experiment.encoder.in_height, width=cfg.experiment.encoder.in_width))
+        if "Normalize" in cfg.experiment.encoder.augmentations:
+            transforms.append(A.Normalize(
+                mean=cfg.experiment.encoder.image_mean,
+                std=cfg.experiment.encoder.image_std,
+                max_pixel_value=cfg.experiment.encoder.image_max_pixel_value,
+            ))
+    transforms.append(ToTensorV2())
+    viz_transforms = A.ReplayCompose(
+        transforms=transforms,
+        keypoint_params=A.KeypointParams(format='yx', remove_invisible=False)
+    )
 
+    train_viz_ds = TrainDataset(cfg, transform=viz_transforms, tokenizer=tokenizer)
+
+    if cfg.experiment.dataset.train_subset is not None:
+        indices = list(range(cfg.experiment.dataset.train_subset))
+        ann_file = train_viz_ds.ann_file
+        coco = train_viz_ds.coco
+        split = train_viz_ds.split
+        train_viz_ds = Subset(train_viz_ds, indices)
+        train_viz_ds.ann_file = ann_file
+        train_viz_ds.coco = coco
+        train_viz_ds.split = split
+
+    if logger is not None:
+        logger.debug(f"Train viz dataset created with {len(train_viz_ds)} samples (no augmentations).")
+
+    return DataLoader(
+        train_viz_ds,
+        batch_size=cfg.experiment.model.batch_size,
+        collate_fn=partial(get_collate_fn(cfg.experiment.model.name), cfg=cfg),
+        num_workers=cfg.num_workers,
+        pin_memory=cfg.run_type.name != 'debug',
+        drop_last=False,
+        shuffle=False,
+    )
