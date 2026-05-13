@@ -1,97 +1,62 @@
-# Pix2Poly (Image-Only) – Reproducible Setup for the NY Subset
+# Pix2Poly (Image-Only) – NY Subset Setup
 
-**This is not a reimplementation.** This repository is a **reproducible setup and patch layer** built on top of the original [PixelsPointsPolygons (P3)](https://github.com/raphaelsulzer/PixelsPointsPolygons) codebase by Raphael Sulzer et al. It documents the minimal code fixes, dataset preparation steps, and configuration changes required to run **image-only Pix2Poly** training and inference on the **New York (NY) subset** of the P3 dataset, without any LiDAR or Open3D dependency.
-
----
-
-## Table of Contents
-
-1. [Scope](#scope)
-2. [Motivation](#motivation)
-3. [Tested Configuration](#tested-configuration)
-4. [Path Convention](#path-convention)
-5. [Quick Start](#quick-start)
-6. [Installation](#installation)
-7. [Required Fixes](#required-fixes)
-8. [Dataset Preparation](#dataset-preparation)
-9. [Pretrained Backbone](#pretrained-backbone)
-10. [Configuration Notes](#configuration-notes)
-11. [Training](#training)
-12. [Training Optimizations](#training-optimizations)
-13. [Monitoring & Metrics](#monitoring--metrics)
-14. [Validation Predictions](#validation-predictions)
-15. [Inference](#inference)
-16. [Expected Results](#expected-results)
-17. [Qualitative Results](#qualitative-results)
-18. [Troubleshooting](#troubleshooting)
-19. [Reproducibility Checklist](#reproducibility-checklist)
-20. [Citation](#citation)
-21. [Acknowledgements](#acknowledgements)
+This repository is a patch layer on top of the original
+[PixelsPointsPolygons (P3)](https://github.com/raphaelsulzer/PixelsPointsPolygons)
+codebase. It is **not a reimplementation** — the model, trainer, and backbone all come
+from Raphael Sulzer et al. What this adds is: the minimal fixes to make image-only
+training work without LiDAR, the NY subset filtering, and the training optimisations
+applied to `scripts/train.py`.
 
 ---
 
-## Scope
+## Why this isn't plug-and-play
 
-- Modality: **image-only** (`p2p_image` experiment)
-- Training scale: **full NY subset** (~43k training images), filtered from the complete P3 dataset
-- Hardware: **single GPU**, SSH workstation (no sudo required)
-- Excluded: LiDAR, Open3D, multimodal fusion
+The original P3 code targets multimodal training (image + LiDAR) on a full multi-country
+dataset (~163 GB). Running image-only on a subset runs into several concrete problems:
 
----
-
-## Motivation
-
-The original P3 implementation targets multimodal training (image + LiDAR) on a full multi-country dataset (~163 GB), which creates several barriers to image-only experimentation:
-
-- **Broken imports** caused by unconditional LiDAR / Open3D module loading
-- **Dataset inconsistencies** (missing images in some splits)
-- **Hydra path issues** requiring absolute path configuration
-- **Dependency conflicts** (transformers version)
-
-This setup resolves all of the above and provides a clean, working baseline for image-only experiments on the NY subset.
+| Problem | What breaks | Fix |
+|---------|-------------|-----|
+| LiDAR imports at module load time | `ImportError: open3d` even when `experiment=p2p_image` | Comment out in `pointpillars/__init__.py` and `model_pix2poly.py` |
+| `get_tile_names_from_dataloader` assumes all IDs exist in COCO index | `IndexError` on filtered subsets where some IDs are missing | Patched to return `unknown_<id>` instead of crashing |
+| Hydra relative paths | Silent misconfiguration depending on launch context (tmux, cron) | Absolute paths in `config/host/default.yaml` |
+| `transformers` version drift | Tokenizer interface changed in newer releases | Pin to `4.38.2` |
 
 ---
 
-## Tested Configuration
+## Tested on
 
-| Component | Version |
-|-----------|---------|
-| OS | Linux (Ubuntu 20.04, SSH workstation) |
-| GPU | NVIDIA A100 / V100 (single GPU) |
-| CUDA | 12.1 |
+| | |
+|---|---|
+| OS | Ubuntu 20.04, SSH workstation |
+| GPU | NVIDIA RTX 3090 (single GPU, out of 4 available) |
+| CUDA | 12.8 |
 | Python | 3.11.11 |
-| PyTorch | 2.2.2 |
-| torchvision | 0.17.2 |
+| PyTorch | 2.2.2 + torchvision 0.17.2 |
 | transformers | 4.38.2 |
-| Conda | any recent version |
-
-> Other GPU models (RTX 3090, A6000) should work. CPU fallback is available but training will be prohibitively slow.
 
 ---
 
-## Path Convention
+## Directory layout
 
-This setup uses a `P3_ROOT` environment variable to avoid hardcoded paths. Set it once in your shell profile:
+Set `P3_ROOT` once in your shell profile and use it everywhere:
 
 ```bash
 export P3_ROOT=/path/to/your/working/directory
 ```
 
-All paths below use `$P3_ROOT` as the base. A typical layout is:
-
 ```
 $P3_ROOT/
-├── PixelsPointsPolygons/          # cloned repository
-├── p3/                            # conda environment (prefix)
-├── PixelsPointsPolygons_dataset/  # raw P3 dataset (downloaded separately)
+├── PixelsPointsPolygons/          # cloned repo
+├── p3/                            # conda env (prefix)
+├── PixelsPointsPolygons_dataset/  # raw P3 dataset
 ├── p3_NY_full/                    # filtered NY-only dataset
 │   └── data/224/
-│       ├── images -> (symlink to dataset images)
+│       ├── images -> (symlink)
 │       └── annotations/blocks/
 │           ├── annotations_NY_train.json
 │           ├── annotations_NY_val.json
 │           └── annotations_NY_test.json
-├── PixelsPointsPolygons_output/   # checkpoints and logs
+├── PixelsPointsPolygons_output/
 │   ├── backbones/
 │   │   └── dino_deitsmall8_pretrain.pth
 │   └── pix2poly/224/v4_image_vit_bs4x16/
@@ -100,167 +65,119 @@ $P3_ROOT/
 
 ---
 
-## Quick Start
-
-These commands run a short smoke-test training (10 steps) to verify the installation is working before committing to a full run.
-
-```bash
-# 1. Set your working directory
-export P3_ROOT=/path/to/your/working/directory
-
-# 2. Clone, install, and apply fixes (see Installation and Required Fixes)
-
-# 3. Run a minimal training pass
-export CUDA_VISIBLE_DEVICES=0
-cd $P3_ROOT/PixelsPointsPolygons
-
-python scripts/train.py \
-  experiment=p2p_image \
-  experiment.model.num_epochs=1 \
-  experiment.dataloader.max_samples=64
-```
-
-If this completes without errors, your environment is correctly set up.
-
----
-
 ## Installation
-
-### 1. Clone the original repository
 
 ```bash
 git clone https://github.com/raphaelsulzer/PixelsPointsPolygons
 cd PixelsPointsPolygons
-```
 
-### 2. Create a Conda environment
-
-> Install the environment on a disk with sufficient space (the environment alone takes ~5 GB).
-
-```bash
+# Conda env as a prefix (easier to manage disk location)
 conda create --prefix $P3_ROOT/p3 python=3.11.11 -y
 conda activate $P3_ROOT/p3
-```
 
-### 3. Install dependencies
-
-```bash
 pip install torch==2.2.2 torchvision==0.17.2 torchaudio==2.2.2
 pip install -e .
 pip install transformers==4.38.2
 ```
 
-> `transformers==4.38.2` is pinned because newer versions break the tokenizer interface used by Pix2Poly.
+`transformers==4.38.2` must be installed *after* `pip install -e .` — the latter can
+pull in a newer version that breaks the tokenizer interface.
+
+The conda env is ~5 GB. Make sure `$P3_ROOT` has enough space.
 
 ---
 
-## Required Fixes
+## Required fixes
 
-The fixes below are necessary to run the image-only pipeline. The original code assumes LiDAR modules are always available; without these patches, the imports will fail at startup even if LiDAR is not used.
+All four changes below are necessary. The original code will crash at import time without
+fixes 1–2, and at runtime without fixes 3–4.
 
-### Fix 1 — Disable LiDAR imports in PointPillars module
+### Fix 1 — `models/pointpillars/__init__.py`
 
-**File:** `models/pointpillars/__init__.py`
-
-Comment out the Open3D-dependent import:
+Comment out:
 
 ```python
 # from .pointpillars_o3d import PointPillarsEncoder, PointPillars
 ```
 
-**Why:** This import triggers `open3d`, which is not installed and not needed for image-only training. Commenting it out prevents an `ImportError` at startup.
+This file is imported unconditionally at startup. `pointpillars_o3d` depends on
+`open3d`, which isn't installed and isn't needed here.
 
----
-
-### Fix 2 — Disable LiDAR imports in the Pix2Poly model
-
-**File:** `models/pix2poly/model_pix2poly.py`
-
-Replace the multimodal imports with image-only ones:
+### Fix 2 — `models/pix2poly/model_pix2poly.py`
 
 ```python
-# from ..pointpillars import PointPillarsViT        # remove: requires LiDAR
+# from ..pointpillars import PointPillarsViT        # multimodal only
 from ..vision_transformer import ViT, ViTDINOv2
-# from ..fusion_layers import EarlyFusionViT         # remove: multimodal only
+# from ..fusion_layers import EarlyFusionViT         # multimodal only
 ```
 
-**Why:** `PointPillarsViT` and `EarlyFusionViT` are only used in multimodal configurations. Importing them unconditionally causes failures even when `experiment=p2p_image` is selected.
+Same issue: these imports run regardless of which experiment config is selected.
 
----
-
-### Fix 3 — Patch `get_tile_names_from_dataloader` in `shared_utils.py`
-
-**File:** `shared_utils.py` (or wherever `get_tile_names_from_dataloader` is defined)
-
-Replace the original implementation with:
+### Fix 3 — `shared_utils.py` — patch `get_tile_names_from_dataloader`
 
 ```python
 def get_tile_names_from_dataloader(loader, ids):
     imgs_dict = loader.dataset.coco.imgs
     names = []
-
     for img_id in ids:
         img_info = imgs_dict.get(img_id)
-
         if img_info is None:
             names.append(f"unknown_{img_id}")
             continue
-
         name = img_info['file_name'].split('/')[-1].replace('.tif', '')
         names.append(name)
     return names
 ```
 
-**Why:** The original function raises an `IndexError` when image IDs present in the dataloader are missing from the COCO index (which happens with filtered subsets). The patched version handles missing IDs gracefully with a placeholder name instead of crashing.
+The original uses direct index lookup and raises `IndexError` on image IDs that are in
+the dataloader but not in the COCO index — which happens whenever you train on a filtered
+subset.
 
----
-
-### Fix 4 — Use absolute paths in Hydra host config
-
-**File:** `config/host/default.yaml`
+### Fix 4 — `config/host/default.yaml`
 
 ```yaml
-data_root: $P3_ROOT/p3_NY_full/data
-model_root: $P3_ROOT/PixelsPointsPolygons_output
+data_root: /absolute/path/to/p3_NY_full/data
+model_root: /absolute/path/to/PixelsPointsPolygons_output
 ```
 
-**Why:** Hydra's path interpolation does not reliably resolve relative paths across all launch contexts (e.g., tmux sessions, cron jobs). Absolute paths prevent silent misconfiguration.
+Hydra silently falls back to its own working directory when relative paths don't resolve.
+If training starts but reads from the wrong place, this is the first thing to check.
 
 ---
 
-## Dataset Preparation
+## Dataset preparation
 
-The full P3 dataset covers multiple countries. This section extracts the NY-only subset used for training.
+The full P3 dataset includes multiple countries. This filters down to NY only.
 
-### Prerequisites
+**Prerequisites:** full P3 dataset at `$P3_ROOT/PixelsPointsPolygons_dataset/data/224/`,
+with `annotations_all_{train,val,test}.json` in `annotations/blocks/`.
 
-- The full P3 dataset downloaded at `$P3_ROOT/PixelsPointsPolygons_dataset/data/224/`
-- Annotation files named `annotations_all_train.json`, `annotations_all_val.json`, `annotations_all_test.json` in `annotations/blocks/`
+### Step 1 — filter NY annotations
 
----
-
-### Step 1 — Filter NY-only annotations
-
-Create and run the following script **inside** `$P3_ROOT/PixelsPointsPolygons_dataset/data/224/annotations/blocks/`:
+Run this from inside `$P3_ROOT/PixelsPointsPolygons_dataset/data/224/annotations/blocks/`:
 
 ```python
 # filter_ny_only.py
-import json, os
+import json
+import os
+
+OUTPUT_DIR = "/mnt/DATA/IMANE/p3_NY_full/data/224/annotations/blocks"
+os.makedirs(OUTPUT_DIR, exist_ok=True)
 
 for split in ['train', 'val', 'test']:
-    with open(f'annotations_all_{split}.json') as f:
+    in_file = f'annotations_all_{split}.json'
+    out_file = os.path.join(OUTPUT_DIR, f'annotations_NY_{split}.json')
+    print(f"Processing {split}...")
+    with open(in_file, 'r') as f:
         data = json.load(f)
-
-    # Keep only images whose file_name contains '/NY/'
-    ny_imgs = [img for img in data['images'] if '/NY/' in img['file_name']]
-    ny_ids  = {img['id'] for img in ny_imgs}
-    ny_anns = [a for a in data['annotations'] if a['image_id'] in ny_ids]
-
-    out = {'images': ny_imgs, 'annotations': ny_anns}
-    with open(f'annotations_NY_{split}.json', 'w') as f:
-        json.dump(out, f)
-
-    print(f"{split}: {len(ny_imgs)} images, {len(ny_anns)} annotations")
+    ny_images = [img for img in data['images'] if '/NY/' in img['file_name']]
+    ny_ids = {img['id'] for img in ny_images}
+    ny_annotations = [ann for ann in data['annotations'] if ann['image_id'] in ny_ids]
+    data['images'] = ny_images
+    data['annotations'] = ny_annotations
+    with open(out_file, 'w') as f:
+        json.dump(data, f)
+    print(f"  -> {len(ny_images)} NY images, {len(ny_annotations)} annotations")
 ```
 
 Expected output:
@@ -271,41 +188,27 @@ val:     529 images,   2,352 annotations
 test:  14,313 images,  51,757 annotations
 ```
 
----
-
-### Step 2 — Create the `p3_NY_full` directory structure
+### Step 2 — build `p3_NY_full`
 
 ```bash
 mkdir -p $P3_ROOT/p3_NY_full/data/224/annotations/blocks
 
-# Symlink images to avoid duplicating ~163 GB of data
+# symlink instead of copying ~163 GB
 ln -s $P3_ROOT/PixelsPointsPolygons_dataset/data/224/images \
       $P3_ROOT/p3_NY_full/data/224/images
+```
 
-# Copy the filtered annotation files
-cp $P3_ROOT/PixelsPointsPolygons_dataset/data/224/annotations/blocks/annotations_NY_*.json \
+The filter script above writes the JSON files directly to `p3_NY_full`. If you ran it
+with a different output path, copy them over:
+
+```bash
+cp /wherever/annotations_NY_*.json \
    $P3_ROOT/p3_NY_full/data/224/annotations/blocks/
 ```
 
-The resulting structure:
+### Step 3 — point Hydra at the NY dataset
 
-```
-$P3_ROOT/p3_NY_full/
-└── data/
-    └── 224/
-        ├── images -> (symlink to original images)
-        └── annotations/
-            └── blocks/
-                ├── annotations_NY_train.json
-                ├── annotations_NY_val.json
-                └── annotations_NY_test.json
-```
-
----
-
-### Step 3 — Update Hydra dataset config
-
-**File:** `config/dataset/p3.yaml`
+`config/dataset/p3.yaml`:
 
 ```yaml
 in_path: $P3_ROOT/p3_NY_full/data/224
@@ -317,9 +220,7 @@ annotations:
 
 ---
 
-## Pretrained Backbone
-
-Download the DINOv2 small backbone used by Pix2Poly:
+## Pretrained backbone
 
 ```bash
 mkdir -p $P3_ROOT/PixelsPointsPolygons_output/backbones
@@ -328,15 +229,15 @@ wget -P $P3_ROOT/PixelsPointsPolygons_output/backbones \
   https://huggingface.co/rsi/PixelsPointsPolygons/resolve/main/backbones/dino_deitsmall8_pretrain.pth
 ```
 
-Ensure `model_root` in `config/host/default.yaml` points to `$P3_ROOT/PixelsPointsPolygons_output` so Hydra can locate the checkpoint.
+`model_root` in `config/host/default.yaml` must point to
+`$P3_ROOT/PixelsPointsPolygons_output` for Hydra to find it.
 
 ---
 
-## Configuration Notes
+## One thing to fix in Hydra config
 
-### Timestamped output directories
-
-By default, Hydra may overwrite the output directory on each run. To prevent this and keep all experiments isolated, add a timestamp to the run folder in `config/config.yaml`:
+By default Hydra overwrites the output directory on each run. Add a timestamp so
+experiments don't clobber each other — `config/config.yaml`:
 
 ```yaml
 hydra:
@@ -344,13 +245,27 @@ hydra:
     dir: ${model_root}/outputs/${now:%Y-%m-%d}/${now:%H-%M-%S}
 ```
 
-Each training run then writes to a unique folder (e.g., `outputs/2024-11-01/14-32-07/`), making it safe to resume or compare runs without risking overwriting previous checkpoints or logs.
+---
+
+## Smoke test
+
+Before starting a full run, verify the environment with 1 epoch / 64 samples:
+
+```bash
+export CUDA_VISIBLE_DEVICES=0
+cd $P3_ROOT/PixelsPointsPolygons
+
+python scripts/train.py \
+  experiment=p2p_image \
+  experiment.model.num_epochs=1 \
+  experiment.dataloader.max_samples=64
+```
 
 ---
 
 ## Training
 
-### Fresh start
+### Short run / quick iteration
 
 ```bash
 export CUDA_VISIBLE_DEVICES=0
@@ -359,11 +274,9 @@ cd $P3_ROOT/PixelsPointsPolygons
 python scripts/train.py experiment=p2p_image
 ```
 
-### Long run with resume (recommended for full 400-epoch training)
+### Full run in tmux (recommended)
 
 ```bash
-export WANDB_MODE=offline
-
 tmux new-session -d -s train_full_ny "bash -c '
   export CUDA_VISIBLE_DEVICES=0 WANDB_MODE=offline &&
   cd $P3_ROOT/PixelsPointsPolygons &&
@@ -374,106 +287,89 @@ tmux new-session -d -s train_full_ny "bash -c '
   2>&1 | tee $P3_ROOT/train_full_ny.log'"
 ```
 
-> **Important:** Use the full Python path (`$P3_ROOT/p3/bin/python`) instead of `conda activate` inside tmux. Conda activation inside a non-interactive shell is unreliable and can cause the session to silently use the wrong interpreter.
+Use the full Python path (`$P3_ROOT/p3/bin/python`) rather than `conda activate` inside
+tmux. Conda activation in non-interactive shells is unreliable and can silently use the
+wrong interpreter with no error.
 
-Training produces:
-- Checkpoints in a timestamped subfolder of `$P3_ROOT/PixelsPointsPolygons_output/outputs/`
-- `metrics.csv` with per-epoch loss and IoU in the same output folder
+Outputs:
+- Checkpoints in a timestamped subfolder under `PixelsPointsPolygons_output/outputs/`
+- `metrics.csv` with per-epoch train/val loss and IoU
 - Live log at `$P3_ROOT/train_full_ny.log`
 
 ---
 
-## Training Optimizations
+## Training optimisations
 
-The following modifications improve training speed and stability without changing the model architecture or affecting final accuracy. They are applied on top of the original training script and are each marked with `# === OPTIM:` in the code.
+These are applied on top of the original `scripts/train.py` and tagged `# === OPTIM:`
+in the code. None of them change the model architecture or affect final accuracy.
 
 **Speed**
 
-| Optimization | Description | Where applied |
-|---|---|---|
-| Mixed precision (AMP) | `GradScaler` + `autocast` to halve memory and speed up forward/backward | `scripts/train.py` |
-| `torch.compile` | Compiles the model graph at first step for faster subsequent iterations | `scripts/train.py` |
-| Loss accumulation | Accumulates gradients over N mini-batches to simulate a larger effective batch size | `scripts/train.py` |
-| Pin memory | `pin_memory=True` in dataloaders for faster CPU→GPU transfers | dataloader config |
-| Persistent workers | Keeps dataloader workers alive between epochs (`persistent_workers=True`) | dataloader config |
-| Separate viz loader | Dedicated `train_viz_loader` with augmentations off for visualization (see below) | `scripts/train.py` |
+| | |
+|---|---|
+| Mixed precision (AMP) | `GradScaler` + `autocast` — roughly halves memory, faster forward/backward |
+| `torch.compile` | Compiles the graph at first step; subsequent steps are faster |
+| Gradient accumulation | Simulates a larger effective batch size without extra memory |
+| `pin_memory=True` | Faster CPU→GPU transfers in the dataloader |
+| `persistent_workers=True` | Workers stay alive between epochs |
 
 **Stability**
 
-| Optimization | Description | Where applied |
-|---|---|---|
-| Gradient clipping | Clips gradients to max norm 1.0, preventing divergence with long sequences | `scripts/train.py` |
-| BCELoss fix | Clamps logits before BCE to avoid `log(0)` NaN loss | `scripts/train.py` |
-| Memory cleanup | `torch.cuda.empty_cache()` + `gc.collect()` called after each epoch | `scripts/train.py` |
-| `destroy_process_group` guard | Wrapped in try/except to prevent crash on single-GPU exit | `scripts/train.py` |
-| wandb offline fallback | Catches wandb auth errors and automatically switches to offline mode | `scripts/train.py` |
+| | |
+|---|---|
+| Gradient clipping (norm 1.0) | The autoregressive decoder generates long sequences; without clipping, loss can diverge early |
+| BCELoss logit clamping | Avoids `log(0)` NaN loss |
+| `empty_cache()` + `gc.collect()` per epoch | Prevents slow memory accumulation over long runs |
+| `destroy_process_group` guard | Single-GPU runs don't have a process group; the original code crashes on exit without this |
+| wandb offline fallback | Catches auth errors and switches to offline mode automatically |
 
-### Visualization loader
+**Visualisation loader**
 
-During training, a separate `train_viz_loader` is used exclusively for generating prediction visualizations. This loader has **augmentations disabled** and **only includes samples that contain polygon annotations**, ensuring that visualizations are clean and meaningful rather than showing augmented or empty tiles. The main training loader is unaffected.
+A separate `train_viz_loader` is used for per-epoch prediction plots. It has
+augmentations off and skips empty tiles (no polygon annotations). The main training
+loader is untouched. Without this, visualisations show flipped/cropped versions of tiles
+that are hard to interpret.
 
 ---
 
-## Monitoring & Metrics
-
-### Real-time monitoring
+## Monitoring
 
 ```bash
-# GPU utilization
 watch -n 1 nvidia-smi
-
-# Live training log
 tail -f $P3_ROOT/train_full_ny.log
 ```
 
-### Metrics logging (`metrics.csv`)
-
-Each epoch appends a row to `metrics.csv` in the run output directory. It records:
-- `train_loss` — average training loss for the epoch
-- `val_loss` — validation loss
-- `val_iou` — polygon IoU on the validation set (computed every epoch)
-
-`val_iou` is the primary metric for selecting the best checkpoint.
-
-### Plotting training curves
+`metrics.csv` in the run output directory gets a row per epoch:
+`train_loss`, `val_loss`, `val_iou`. `val_iou` is used for best-checkpoint selection.
 
 ```bash
 python $P3_ROOT/plot_losses_auto.py
 ```
 
-This script reads `metrics.csv` from the most recent timestamped run directory and saves `loss_curves.png` alongside it. The figure has two panels:
-- Left: train and val loss over epochs
-- Right: validation IoU over epochs
-
-You can run this at any point during or after training to inspect progress.
+Reads `metrics.csv` from the most recent timestamped run and saves `loss_curves.png`
+next to it — two panels, loss and IoU over epochs. Works mid-run.
 
 ---
 
-## Validation Predictions
+## Validation predictions
 
-At the end of each 5 epochs, predicted building polygons for the validation set are saved in COCO JSON format:
+Every 5 epochs, polygon predictions for the val set are saved as COCO JSON:
 
 ```
-outputs/<date>/<time>/
-└── predictions_NY_val/
-    ├── val_epoch_4.json
-    ├── val_epoch_9.json
-    ├── ...
-    └── best_val_iou.json     # copy of the best-epoch predictions
+outputs/<date>/<time>/predictions_NY_val/
+├── val_epoch_4.json
+├── val_epoch_9.json
+├── ...
+└── best_val_iou.json
 ```
 
-Each file contains the model's polygon predictions in COCO format and can be used for:
-- Computing additional metrics offline (e.g., with `pycocotools`)
-- Visualizing specific validation samples
-- Submitting to an evaluation server
-
-`best_val_iou.json` is automatically updated whenever a new best validation IoU is achieved.
+`best_val_iou.json` is overwritten whenever a new best `val_iou` is reached. Useful for
+offline evaluation with `pycocotools` or visualising specific samples without rerunning
+inference.
 
 ---
 
 ## Inference
-
-Run inference on a single image using the best validation checkpoint:
 
 ```bash
 export CUDA_VISIBLE_DEVICES=0
@@ -486,34 +382,32 @@ python scripts/predict_demo.py \
   +image_file=demo_data/image0_NY_val.tif
 ```
 
-**What this produces:**
-- A visualization image saved as `prediction_pix2poly_image.png` in the current directory (or the configured output directory)
-- Predicted building polygons overlaid on the input image
-
-> To run on your own image, replace `demo_data/image0_NY_val.tif` with the path to a `.tif` file in the same format as the P3 dataset (224×224 px, RGB).
+Saves `prediction_pix2poly_image.png` with predicted building polygons overlaid. Input
+must be a 224×224 px RGB `.tif` in the same format as the P3 dataset.
 
 ---
 
-## Expected Results
+## Results
 
-Results from my run on the NY subset, single A100, stopped at epoch 160 (out of 200 configured) once val IoU had converged:
+Single RTX 3090, stopped at epoch 160 (configured for 200) once val IoU had clearly
+converged:
 
-| Metric | Value |
-|--------|-------|
-| Best validation IoU | **0.831** (epoch 139) |
-| Val IoU at early stopping (epoch 159) | 0.815 |
-| Training loss at stop | ~1.53 |
-| Epochs run | 160 / 200 (stopped early — converged) |
+| | |
+|---|---|
+| Best val IoU | **0.831** (epoch 139) |
+| Val IoU at stop (epoch 159) | 0.815 |
+| Train loss at stop | ~1.53 |
 
-Val IoU reached ~0.80 around epoch 79 and plateaued in the 0.81–0.83 range from epoch 84 onward with no meaningful improvement after epoch 139.
+Val IoU crossed 0.80 around epoch 79 and stayed in the 0.81–0.83 range from epoch 84
+onward. No meaningful improvement after epoch 139, so I stopped early.
 
-Results on other country subsets (CH, NZ) have not been evaluated with this setup.
+I haven't evaluated on other country subsets (CH, NZ) with this setup.
 
 ---
 
-## Qualitative Results
+## Qualitative results
 
-Validation sample at epoch 159 (NY subset). Left: ground truth polygons. Right: model predictions.
+Epoch 159 on the NY val set. Left: ground truth. Right: predictions.
 
 ![Val prediction example](media/val_prediction_example.png)
 
@@ -521,13 +415,9 @@ Validation sample at epoch 159 (NY subset). Left: ground truth polygons. Right: 
 
 ## Troubleshooting
 
-### Philosophy
-
-Most failures in this setup come from one of three root causes:
-
-1. **Wrong paths** — Hydra silently loads a default config instead of your intended one. Always verify `data_root` and `model_root` are resolved correctly (add a `print(cfg)` at the top of the train script if unsure).
-2. **Missing or mismatched dependencies** — especially `transformers`. Always install the pinned version (`4.38.2`) after `pip install -e .`.
-3. **Dataset mismatch** — the annotation JSON references image paths that do not exist in your symlinked directory. Verify paths with a quick sanity check:
+Most failures come from one of three things: wrong paths (Hydra silently uses defaults),
+wrong `transformers` version (install order matters), or the annotation JSON referencing
+paths that don't exist under your symlink. Quick sanity check for the last one:
 
 ```python
 import json
@@ -536,65 +426,24 @@ with open('annotations_NY_train.json') as f:
 print(data['images'][0]['file_name'])  # should match your images/ directory
 ```
 
-### Common errors
+**`ImportError: open3d`** — Fixes 1 and 2 not applied.
 
-| Error | Cause | Fix |
-|-------|-------|-----|
-| `ImportError: open3d` | LiDAR imports not disabled | Apply Fix 1 and Fix 2 above |
-| Hydra path errors | Relative paths in config | Use absolute paths (Fix 4) |
-| `transformers` API error | Wrong transformers version | `pip install transformers==4.38.2` |
-| `IndexError` in utils | `get_tile_names_from_dataloader` crashes on missing IDs | Apply Fix 3 above |
-| tmux session dies silently | `conda activate` fails in non-interactive shell | Use full Python path (see Training section) |
-| wandb authentication failure | wandb tries to connect without credentials | `export WANDB_MODE=offline` |
+**Hydra path errors / training reads wrong data** — Relative paths in
+`config/host/default.yaml`. Use absolute paths.
 
----
+**`transformers` API error** — `pip install -e .` pulled in a newer version. Run
+`pip install transformers==4.38.2` again after.
 
-## Reproducibility Checklist
+**`IndexError` in `shared_utils.py`** — Fix 3 not applied.
 
-### Environment
-- [ ] Python 3.11.11
-- [ ] PyTorch 2.2.2, torchvision 0.17.2
-- [ ] `transformers==4.38.2`
-- [ ] CUDA available and detected by PyTorch
+**tmux session exits silently** — `conda activate` failed in the non-interactive shell.
+Use the full Python path.
 
-### Setup
-- [ ] Original repository cloned
-- [ ] Conda environment created on a disk with sufficient space
-- [ ] Project installed with `pip install -e .`
-
-### Code Fixes
-- [ ] LiDAR import in `models/pointpillars/__init__.py` commented out
-- [ ] LiDAR imports in `models/pix2poly/model_pix2poly.py` commented out
-- [ ] `get_tile_names_from_dataloader` patched in `shared_utils.py`
-
-### Dataset
-- [ ] Full P3 dataset available
-- [ ] NY-only annotations filtered using `filter_ny_only.py`
-- [ ] `p3_NY_full/` directory created with symlink to images
-- [ ] Filtered JSONs copied into `p3_NY_full/data/224/annotations/blocks/`
-
-### Configuration
-- [ ] `config/host/default.yaml` uses absolute paths
-- [ ] `config/dataset/p3.yaml` points to `p3_NY_full` and NY annotation files
-- [ ] Backbone checkpoint path is valid
-- [ ] Timestamped output directories configured in `config/config.yaml`
-
-### Training
-- [ ] Quick Start smoke test passes (1 epoch, 64 samples)
-- [ ] Full training runs without crash
-- [ ] `metrics.csv` is being written to the timestamped output directory
-- [ ] `best_val_iou.json` is updated after each best epoch
-- [ ] `plot_losses_auto.py` generates `loss_curves.png` from `metrics.csv`
-
-### Inference
-- [ ] `predict_demo.py` runs on a sample image
-- [ ] Output image (`prediction_pix2poly_image.png`) is generated
+**wandb auth error** — `export WANDB_MODE=offline`.
 
 ---
 
 ## Citation
-
-If you use this setup in your work, please cite the original P3 paper:
 
 ```bibtex
 @misc{sulzer2025p3datasetpixelspoints,
@@ -604,11 +453,4 @@ If you use this setup in your work, please cite the original P3 paper:
 }
 ```
 
----
-
-## Acknowledgements
-
-All credit for the original model, dataset, and codebase belongs to the P3 authors:
-
-[https://github.com/raphaelsulzer/PixelsPointsPolygons](https://github.com/raphaelsulzer/PixelsPointsPolygons)
-
+Original codebase: [raphaelsulzer/PixelsPointsPolygons](https://github.com/raphaelsulzer/PixelsPointsPolygons)
